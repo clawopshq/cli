@@ -21,6 +21,10 @@ type Token struct {
 	Expiry       time.Time `json:"expiry"`
 	Scopes       []string  `json:"scopes,omitempty"`
 
+	// Resource 는 RFC 8707 resource indicator. 갱신 요청에도 같은 값을 실어야
+	// 서버가 JWT 를 발급하고 스코프를 유지한다 — 로그인 때 쓴 값을 그대로 보관한다.
+	Resource string `json:"resource,omitempty"`
+
 	// 표시 전용. access token 의 claim 에서 채운다.
 	AccountID string `json:"account_id,omitempty"`
 	Email     string `json:"email,omitempty"`

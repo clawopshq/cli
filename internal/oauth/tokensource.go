@@ -2,8 +2,10 @@ package oauth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -91,23 +93,31 @@ func (ts *TokenSource) refreshLocked(ctx context.Context, stale *config.Token) (
 	if err != nil {
 		return nil, err
 	}
-	conf := &oauth2.Config{
-		ClientID: config.CLIClientID,
-		Endpoint: oauth2.Endpoint{
-			TokenURL:  meta.TokenEndpoint,
-			AuthStyle: oauth2.AuthStyleInParams,
-		},
+
+	// RFC 8707: refresh 에도 resource 를 실어야 한다. 빠뜨리면 서버가
+	// resourceServer 없이 발급해 access token 이 opaque 로 바뀌고 scope 가 OIDC
+	// 표준 세 개로 깎인다 — 로그인은 멀쩡했는데 첫 갱신에서 자격증명이 조용히
+	// 망가지고 이후 모든 API 가 401 이 된다.
+	// 보통은 로그인 때 저장해 둔 값을 쓴다. 비어 있는 경우는 resource 를 보내기
+	// 전 빌드로 로그인한 토큰뿐이라, 그런 세션이 첫 갱신에서 망가지지 않도록
+	// 여기서 한 번 채워 준다.
+	resource := stale.Resource
+	if resource == "" {
+		if pr, err := DiscoverProtectedResource(ctx, meta.Issuer); err == nil {
+			resource = pr.Resource
+		}
 	}
 
 	if ts.Notify != nil {
 		ts.Notify("세션을 갱신하는 중...")
 	}
-	newTok, err := conf.TokenSource(ctx, &oauth2.Token{RefreshToken: stale.RefreshToken}).Token()
+	newTok, err := refreshGrant(ctx, meta.TokenEndpoint, stale.RefreshToken, resource)
 	if err != nil {
 		return nil, fmt.Errorf("세션 갱신에 실패했습니다. `clawops auth login` 을 다시 실행하세요: %w", err)
 	}
 
 	out := toStoredToken(newTok)
+	out.Resource = resource
 	if out.RefreshToken == "" {
 		// 서버가 새 refresh token 을 주지 않았으면 기존 것을 유지한다.
 		out.RefreshToken = stale.RefreshToken
@@ -116,6 +126,66 @@ func (ts *TokenSource) refreshLocked(ctx context.Context, stale *config.Token) (
 		return nil, fmt.Errorf("갱신한 토큰을 저장하지 못했습니다: %w", err)
 	}
 	return out, nil
+}
+
+// refreshGrant 는 refresh_token grant 를 직접 수행한다.
+//
+// oauth2.Config.TokenSource 를 쓰지 않는 이유: 그 경로는 요청에 추가 파라미터를
+// 실을 수 없어 resource 를 보낼 방법이 없다 (Exchange 와 달리 옵션을 받지 않는다).
+func refreshGrant(ctx context.Context, tokenURL, refreshToken, resource string) (*oauth2.Token, error) {
+	form := url.Values{}
+	form.Set("grant_type", "refresh_token")
+	form.Set("refresh_token", refreshToken)
+	form.Set("client_id", config.CLIClientID) // public client — secret 없음
+	if resource != "" {
+		form.Set("resource", resource)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var r struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		TokenType    string `json:"token_type"`
+		ExpiresIn    int64  `json:"expires_in"`
+		Scope        string `json:"scope"`
+	}
+	if err := json.Unmarshal(body, &r); err != nil {
+		return nil, fmt.Errorf("토큰 응답을 읽을 수 없습니다: %w", err)
+	}
+	if r.AccessToken == "" {
+		return nil, errors.New("토큰 응답에 access_token 이 없습니다")
+	}
+
+	tok := &oauth2.Token{
+		AccessToken:  r.AccessToken,
+		RefreshToken: r.RefreshToken,
+		TokenType:    r.TokenType,
+	}
+	if r.ExpiresIn > 0 {
+		tok.Expiry = time.Now().Add(time.Duration(r.ExpiresIn) * time.Second)
+	}
+	// toStoredToken 이 응답의 scope 를 Extra 로 읽는다.
+	return tok.WithExtra(map[string]any{"scope": r.Scope}), nil
 }
 
 // Revoke 는 서버의 grant 를 폐기한다 (RFC 7009).
@@ -146,7 +216,7 @@ func Revoke(ctx context.Context, issuer, token, hint string) error {
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}

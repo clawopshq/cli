@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -25,7 +26,11 @@ const (
 	EnvIssuer  = "CLAWOPS_ISSUER"
 
 	DefaultProfile = "default"
-	DefaultIssuer  = "https://api.claw-ops.com"
+
+	// OIDC Discovery §4.3 은 문서의 issuer 가 조회에 쓴 URL 과 같기를 요구한다.
+	// api.claw-ops.com 에도 discovery alias 가 있지만 그쪽은 issuer 로
+	// auth.claw-ops.com 을 돌려주므로 §4.3 을 어긴다 — 정본 호스트를 쓴다.
+	DefaultIssuer = "https://auth.claw-ops.com"
 
 	// CLIClientID 는 서버에 시드된 public client. secret 이 없고 PKCE S256 만 쓴다.
 	CLIClientID = "clawops-cli"
@@ -77,7 +82,7 @@ func Load(name string) (*Profile, error) {
 		p = &Profile{}
 	}
 	p.Name = name
-	if p.Issuer == "" {
+	if p.Issuer == "" || isLegacyIssuer(p.Issuer) {
 		p.Issuer = DefaultIssuer
 	}
 	if v := os.Getenv(EnvIssuer); v != "" {
@@ -87,6 +92,20 @@ func Load(name string) (*Profile, error) {
 		p.APIKey = key
 	}
 	return p, nil
+}
+
+// legacyIssuers 는 예전 빌드가 프로필에 적어 두었던 issuer 값들이다.
+//
+// 그 시절 기본값이던 api.claw-ops.com 은 discovery 는 되지만 issuer 로
+// auth.claw-ops.com 을 돌려주기 때문에, OIDC Discovery §4.3 검사를 도입한 뒤로는
+// 저장된 값을 그대로 쓰면 로그인도 갱신도 전부 막힌다. 사용자가 손으로 TOML 을
+// 고치게 하는 대신 읽는 시점에 정본으로 옮긴다.
+var legacyIssuers = map[string]bool{
+	"https://api.claw-ops.com": true,
+}
+
+func isLegacyIssuer(issuer string) bool {
+	return legacyIssuers[strings.TrimRight(issuer, "/")]
 }
 
 // LoadFile 은 config.toml 을 읽는다. 없으면 빈 설정을 돌려준다.

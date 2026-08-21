@@ -19,32 +19,55 @@ type fakeIssuer struct {
 	*httptest.Server
 
 	// 기록용 — 테스트가 검증한다.
-	gotChallenge   string
-	gotMethod      string
-	gotScope       string
-	gotRedirectURI string
-	gotClientID    string
+	gotChallenge      string
+	gotMethod         string
+	gotScope          string
+	gotRedirectURI    string
+	gotClientID       string
+	gotPrompt         string
+	gotResource       string
+	gotTokenResource  string
+	protectedResource string
 
-	// authorize 응답을 조작한다.
-	overrideState string
-	denyWith      string
+	// 응답을 조작한다.
+	overrideState  string
+	denyWith       string
+	issSupported   bool   // discovery 가 RFC 9207 지원을 광고할지
+	issInResponse  string // authorize 응답에 실을 iss ("-" 면 생략)
+	overrideIssuer string // discovery 문서의 issuer 를 다른 값으로
 }
 
 func newFakeIssuer(t *testing.T) *fakeIssuer {
 	t.Helper()
-	f := &fakeIssuer{}
+	f := &fakeIssuer{protectedResource: "https://api.example.test/mcp"}
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		issuer := f.URL
+		if f.overrideIssuer != "" {
+			issuer = f.overrideIssuer
+		}
 		writeJSON(w, map[string]any{
-			"issuer":                 f.URL,
+			"issuer":                 issuer,
 			"authorization_endpoint": f.URL + "/authorize",
 			"token_endpoint":         f.URL + "/token",
 			"revocation_endpoint":    f.URL + "/revoke",
+			"authorization_response_iss_parameter_supported": f.issSupported,
 			"scopes_supported": []string{
 				"openid", "profile", "email", "offline_access",
 				"read:calls", "read:messages", "write:calls", "write:messages",
 			},
+		})
+	})
+
+	mux.HandleFunc("/.well-known/oauth-protected-resource", func(w http.ResponseWriter, r *http.Request) {
+		if f.protectedResource == "" {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, map[string]any{
+			"resource":              f.protectedResource,
+			"authorization_servers": []string{f.URL},
 		})
 	})
 
@@ -55,6 +78,8 @@ func newFakeIssuer(t *testing.T) *fakeIssuer {
 		f.gotScope = q.Get("scope")
 		f.gotRedirectURI = q.Get("redirect_uri")
 		f.gotClientID = q.Get("client_id")
+		f.gotPrompt = q.Get("prompt")
+		f.gotResource = q.Get("resource")
 
 		state := q.Get("state")
 		if f.overrideState != "" {
@@ -70,12 +95,22 @@ func newFakeIssuer(t *testing.T) *fakeIssuer {
 			rq.Set("code", "test-auth-code")
 		}
 		rq.Set("state", state)
+		switch f.issInResponse {
+		case "":
+			if f.issSupported {
+				rq.Set("iss", f.URL)
+			}
+		case "-": // 일부러 생략
+		default:
+			rq.Set("iss", f.issInResponse)
+		}
 		back.RawQuery = rq.Encode()
 		http.Redirect(w, r, back.String(), http.StatusFound)
 	})
 
 	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
+		f.gotTokenResource = r.Form.Get("resource")
 
 		// PKCE 검증 — verifier 를 S256 한 값이 authorize 때 받은 challenge 와 같아야 한다.
 		sum := sha256.Sum256([]byte(r.Form.Get("code_verifier")))

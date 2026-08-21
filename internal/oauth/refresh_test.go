@@ -27,12 +27,16 @@ func isolate(t *testing.T) {
 // 이미 쓴 refresh token 을 다시 내밀면 400 을 준다 (재사용 감지).
 type rotatingIssuer struct {
 	*httptest.Server
-	mu       sync.Mutex
-	valid    string
-	next     int
-	attempts atomic.Int32
-	reuses   atomic.Int32
+	mu           sync.Mutex
+	valid        string
+	next         int
+	attempts     atomic.Int32
+	reuses       atomic.Int32
+	lastResource string
 }
+
+// 실제 배포의 protected resource 에 대응하는 테스트용 값.
+const rotatingResource = "https://api.example.test/mcp"
 
 func newRotatingIssuer(t *testing.T, initial string) *rotatingIssuer {
 	t.Helper()
@@ -44,6 +48,13 @@ func newRotatingIssuer(t *testing.T, initial string) *rotatingIssuer {
 			"issuer":                 ri.URL,
 			"authorization_endpoint": ri.URL + "/authorize",
 			"token_endpoint":         ri.URL + "/token",
+		})
+	})
+
+	mux.HandleFunc("/.well-known/oauth-protected-resource", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{
+			"resource":              rotatingResource,
+			"authorization_servers": []string{ri.URL},
 		})
 	})
 
@@ -63,12 +74,28 @@ func newRotatingIssuer(t *testing.T, initial string) *rotatingIssuer {
 		ri.next++
 		ri.valid = "rt-rotated-" + string(rune('0'+ri.next))
 
-		writeJSON(w, map[string]any{
-			"access_token":  makeJWT(map[string]any{"account_id": "AC00000000000000000000000000000000"}),
+		// 실제 서버(oidc-provider)를 그대로 흉내낸다. refresh 요청에 resource 가
+		// 없으면 resolve_resource.js 의 모든 분기가 떨어져 resource=undefined 가
+		// 되고, refresh_token.js 는 resourceServer 없이 opaque 토큰을 발급하면서
+		// scope 를 OIDC 표준 것만 남긴다(getOIDCScopeFiltered). 픽스처가 이걸
+		// 반영하지 않으면 "상상한 페이로드" 를 검증하게 된다.
+		resource := r.Form.Get("resource")
+		ri.lastResource = resource
+		body := map[string]any{
 			"refresh_token": ri.valid,
 			"token_type":    "Bearer",
 			"expires_in":    3600,
-		})
+		}
+		if resource == rotatingResource {
+			body["access_token"] = makeJWT(map[string]any{
+				"account_id": "AC00000000000000000000000000000000",
+			})
+			body["scope"] = "openid profile email read:calls read:messages"
+		} else {
+			body["access_token"] = "opaque-no-resource-token"
+			body["scope"] = "openid profile email"
+		}
+		writeJSON(w, body)
 	})
 
 	ri.Server = httptest.NewServer(mux)

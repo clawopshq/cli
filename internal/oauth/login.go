@@ -83,12 +83,38 @@ func Login(ctx context.Context, opts LoginOptions) (*config.Token, error) {
 	if err != nil {
 		return nil, err
 	}
-	authURL := conf.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier))
+
+	authOpts := []oauth2.AuthCodeOption{
+		oauth2.S256ChallengeOption(verifier),
+		// OIDC Core §11: offline_access 는 prompt 에 consent 가 없으면 AS 가
+		// 조용히 무시한다 (oidc-provider check_scope.js). 이걸 빠뜨리면 refresh
+		// token 이 영원히 발급되지 않아 access token 만료마다 재로그인해야 한다.
+		oauth2.SetAuthURLParam("prompt", "consent"),
+	}
+	// RFC 8707 resource indicator. 지정해야 서버가 JWT access token 을 발급한다
+	// (없으면 opaque 라 account_id claim 을 읽을 수 없다). metadata 조회가
+	// 실패해도 로그인 자체는 막지 않는다 — 표시 정보를 잃을 뿐이다.
+	var exchangeOpts []oauth2.AuthCodeOption
+	var resource string
+	if pr, err := DiscoverProtectedResource(ctx, meta.Issuer); err == nil {
+		resource = pr.Resource
+		resourceOpt := oauth2.SetAuthURLParam("resource", resource)
+		authOpts = append(authOpts, resourceOpt)
+		// 토큰 교환에도 같은 resource 를 실어야 발급 대상이 authorization 단계와
+		// 어긋나지 않는다 (RFC 8707 §2.2).
+		exchangeOpts = append(exchangeOpts, resourceOpt)
+	} else {
+		// resource 없이 받은 토큰은 opaque 이고 scope 가 OIDC 표준 세 개로 깎여
+		// API 호출에 쓸 수 없다. 로그인을 막지는 않되 조용히 넘기지도 않는다.
+		notify("경고: resource metadata 를 읽지 못했습니다 (%v).\n"+
+			"  이 세션의 토큰으로는 API 호출이 거부될 수 있습니다.", err)
+	}
+	authURL := conf.AuthCodeURL(state, authOpts...)
 
 	// 콜백 대기 시작 — 브라우저를 열기 전에 서버가 떠 있어야 한다.
 	ctx, cancel := context.WithTimeout(ctx, loginTimeout)
 	defer cancel()
-	results := serveCallback(ctx, ln, state)
+	results := serveCallback(ctx, ln, state, meta)
 
 	if opts.NoBrowser {
 		notify("아래 주소를 브라우저에서 여세요:\n\n  %s\n", authURL)
@@ -108,11 +134,13 @@ func Login(ctx context.Context, opts LoginOptions) (*config.Token, error) {
 		if r.err != nil {
 			return nil, r.err
 		}
-		tok, err := conf.Exchange(ctx, r.code, oauth2.VerifierOption(verifier))
+		tok, err := conf.Exchange(ctx, r.code,
+			append(exchangeOpts, oauth2.VerifierOption(verifier))...)
 		if err != nil {
 			return nil, fmt.Errorf("토큰 교환에 실패했습니다: %w", err)
 		}
 		stored := toStoredToken(tok)
+		stored.Resource = resource
 		if len(stored.Scopes) == 0 {
 			stored.Scopes = scopes
 		}
@@ -126,12 +154,35 @@ type callbackResult struct {
 }
 
 // serveCallback 은 redirect 를 한 번 받고 종료하는 로컬 HTTP 서버다.
-func serveCallback(ctx context.Context, ln net.Listener, wantState string) <-chan callbackResult {
+func serveCallback(
+	ctx context.Context,
+	ln net.Listener,
+	wantState string,
+	meta *Metadata,
+) <-chan callbackResult {
 	out := make(chan callbackResult, 1)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/cb", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
+
+		// RFC 9207: AS 가 iss 를 보내면 클라이언트는 그것이 우리가 요청을 보낸
+		// AS 인지 확인해야 한다. 확인하지 않으면 여러 AS 를 쓰는 클라이언트가
+		// mix-up 공격으로 인가 코드를 엉뚱한 AS 의 토큰 엔드포인트에 넘길 수 있다.
+		// 서버가 지원한다고 광고했는데 값이 없으면 그것도 이상 신호로 본다.
+		if gotIss := q.Get("iss"); gotIss != "" {
+			if gotIss != meta.Issuer {
+				writeResultPage(w, false, "발급자가 일치하지 않습니다", "요청이 변조되었을 수 있습니다.")
+				out <- callbackResult{err: fmt.Errorf(
+					"iss 가 일치하지 않습니다 (RFC 9207): 기대 %q, 수신 %q", meta.Issuer, gotIss)}
+				return
+			}
+		} else if meta.IssParameterSupported {
+			writeResultPage(w, false, "발급자 정보가 없습니다", "다시 시도해 주세요.")
+			out <- callbackResult{err: errors.New(
+				"AS 가 iss 파라미터를 지원한다고 광고했지만 응답에 없습니다 (RFC 9207)")}
+			return
+		}
 
 		// /authorize 가 거절되면 error 파라미터로 되돌아온다 (RFC 6749 §4.1.2.1).
 		if e := q.Get("error"); e != "" {

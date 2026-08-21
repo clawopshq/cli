@@ -180,6 +180,9 @@ type authStatus struct {
 	Scopes    []string `json:"scopes,omitempty"`
 	ExpiresAt string   `json:"expires_at,omitempty"`
 	Expired   bool     `json:"expired"`
+	// refresh token 이 없으면 access token 만료 = 재로그인이다. 겉으로는 정상
+	// 로그인과 구분되지 않아서 만료 시점에야 드러나므로 상태에 노출한다.
+	HasRefreshToken bool `json:"has_refresh_token"`
 }
 
 func newAuthStatusCmd() *cobra.Command {
@@ -205,6 +208,7 @@ func newAuthStatusCmd() *cobra.Command {
 					st.Email = tok.Email
 					st.Scopes = tok.Scopes
 					st.Expired = tok.Expired()
+					st.HasRefreshToken = tok.RefreshToken != ""
 					if !tok.Expiry.IsZero() {
 						st.ExpiresAt = tok.Expiry.Format(time.RFC3339)
 					}
@@ -230,11 +234,18 @@ func newAuthStatusCmd() *cobra.Command {
 						pairs = append(pairs, [2]string{"사용자", st.Email})
 					}
 					if st.ExpiresAt != "" {
+						// 만료됐을 때 무슨 일이 일어나는지는 아래 "자동 갱신" 줄이
+						// 말한다 — 여기서 같이 설명하면 두 줄이 같은 말을 한다.
 						state := "유효"
 						if st.Expired {
-							state = "만료 — 다음 요청에서 자동 갱신"
+							state = "만료"
 						}
 						pairs = append(pairs, [2]string{"만료", fmt.Sprintf("%s (%s)", st.ExpiresAt, state)})
+					}
+					if st.HasRefreshToken {
+						pairs = append(pairs, [2]string{"자동 갱신", "가능"})
+					} else {
+						pairs = append(pairs, [2]string{"자동 갱신", "불가 — 만료 시 재로그인"})
 					}
 					if len(st.Scopes) > 0 {
 						pairs = append(pairs, [2]string{"스코프", summarizeScopes(st.Scopes)})
