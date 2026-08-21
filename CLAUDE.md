@@ -46,3 +46,10 @@ headless 가 실제로 필요해지면 그때 서버에 붙인다 — v1 은 API
 ```bash
 make lint && make test && ./scripts/check-no-real-data.sh
 ```
+
+## 릴리스 전 처리 (미해결)
+
+**macOS 코드사이닝.** 서명 안 된 Go 바이너리가 키체인에 처음 접근하면 "clawops 가
+키체인 항목에 접근하려 합니다" 프롬프트가 뜬다. 사용자는 "항상 허용" 으로 넘길 수
+있지만 첫인상이 나쁘고 비대화형 환경에서는 멈춘다. goreleaser 에 서명 +
+notarization 을 붙여야 한다.

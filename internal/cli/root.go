@@ -104,3 +104,8 @@ func resolveContext() (*config.Profile, *output.Writer, error) {
 	}
 	return prof, w, nil
 }
+
+// notImplemented 는 아직 배선되지 않은 커맨드가 돌려주는 에러다.
+func notImplemented(what string) error {
+	return fmt.Errorf("%s: 아직 구현되지 않았습니다 (스캐폴드)", what)
+}

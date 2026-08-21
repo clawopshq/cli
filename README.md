@@ -8,7 +8,11 @@ clawops messages send "점검 안내" --to 01000000000
 clawops calls list --status failed --since 1h --json | jq -r '.[].hangupCause' | sort | uniq -c
 ```
 
-> 현재 상태: **스캐폴드.** 커맨드 트리와 플래그 계약은 확정, 실행부는 미구현.
+> 현재 상태: **`auth` 동작함.** `login` / `logout` / `status` / `refresh` 가 실제로
+> 붙는다. `messages` · `calls` · `numbers` 는 커맨드 트리와 플래그 계약만 확정된
+> 상태이고 실행부는 미구현이다.
+>
+> 서버 쪽에 `clawops-cli` public client 를 시드해야 실제 로그인이 된다.
 
 ## 설치
 
@@ -46,6 +50,23 @@ clawops auth refresh -s write:messages
 clawops auth login --profile sandbox
 clawops --profile sandbox calls list
 ```
+
+## 자격증명 저장
+
+| 위치 | 내용 |
+|---|---|
+| OS 키체인 (macOS Keychain / libsecret / wincred) | access · refresh token |
+| `~/.config/clawops/config.toml` (0600) | 프로필 · issuer · account_id · 기본 발신번호 |
+| `~/.config/clawops/credentials.json` (0600) | 키체인을 쓸 수 없을 때만 (헤드리스 리눅스 등) |
+
+설정 파일에는 토큰을 넣지 않는다. `auth status` 로 프로필을 확인하는 데 키체인을
+열 필요가 없고, 설정 파일을 실수로 공유해도 자격증명이 새지 않는다.
+
+`clawops` 는 여러 셸에서 동시에 돌 수 있다. 서버가 refresh token 을 회전시키므로
+(`rotateRefreshToken: true`) 모든 갱신은 파일 락 안에서 직렬화하고, 락을 잡은 뒤
+저장소를 다시 읽는다 — 기다리는 동안 다른 프로세스가 이미 갱신했다면 우리가 든
+refresh token 은 그 시점에 무효다. 이 재확인이 없으면 `invalid_grant` 로 grant 가
+통째로 revoke 되고 사용자는 이유 없이 로그아웃당한다.
 
 ## 설계 원칙
 

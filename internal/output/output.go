@@ -12,7 +12,6 @@ import (
 	"io"
 	"os"
 	"strings"
-	"text/tabwriter"
 )
 
 type Format string
@@ -57,11 +56,7 @@ func (w *Writer) Data(v any, renderTable func(io.Writer) error) error {
 	if renderTable == nil {
 		return nil
 	}
-	tw := tabwriter.NewWriter(w.out, 0, 4, 2, ' ', 0)
-	if err := renderTable(tw); err != nil {
-		return err
-	}
-	return tw.Flush()
+	return renderTable(w.out)
 }
 
 // Info 는 사람용 안내를 stderr 로 낸다. JSON 파이프를 오염시키지 않는다.
