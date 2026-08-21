@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -51,6 +52,11 @@ func TestFileTokenRoundTrip(t *testing.T) {
 
 // 폴백 파일은 소유자만 읽을 수 있어야 한다. 발신 권한이 붙은 토큰이다.
 func TestCredentialsFilePermissions(t *testing.T) {
+	// Windows 의 파일 권한은 POSIX 모드 비트가 아니다 (Chmod 는 읽기전용 비트만
+	// 바꾼다). Windows 는 wincred 를 쓰므로 이 폴백 경로 자체를 거의 타지 않는다.
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX 권한 비트가 없는 플랫폼")
+	}
 	isolate(t)
 	if err := saveFileToken("default", []byte(`{"access_token":"at"}`)); err != nil {
 		t.Fatal(err)
