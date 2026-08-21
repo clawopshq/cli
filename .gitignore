@@ -1,0 +1,4 @@
+/dist/
+/clawops
+*.test
+.DS_Store
