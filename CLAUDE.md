@@ -16,7 +16,11 @@ ClawOps 공식 CLI (Go). **공개 레포**이며 MIT 다.
 서버는 `node-oidc-provider` 로 돌고 아래는 **이미 구현돼 있다** — 다시 만들지 말 것.
 
 - PKCE S256 강제 (`pkce.required: () => true`)
-- loopback wildcard redirect: `http://127.0.0.1:*/cb` (RFC 8252 §7.3)
+- loopback redirect: **서버가 포트를 무시한다** (RFC 8252 §7.3). `application_type='native'`
+  + http + loopback 호스트면 등록 포트와 무관하게 통과하므로, 등록값은 **포트 없는**
+  `http://127.0.0.1/cb` 다. ⛔ `:*` wildcard 는 우리가 만든 비표준 문법이니 쓰지 말 것.
+  ⚠️ 게이트가 두 층이다 — Koa 미들웨어(`oidc/redirect-policy.ts`)가 provider 보다 먼저
+  돌아서, 앞 층이 더 엄격하면 뒤 층의 완화는 도달조차 못 한다 (clawops #839 에서 정렬함)
 - `/.well-known/openid-configuration` root alias → 엔드포인트 discovery 가능
 - refresh token 30 일, `offline_access` scope
 - revocation (RFC 7009)

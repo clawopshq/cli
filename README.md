@@ -30,7 +30,8 @@ curl -fsSL https://cli.claw-ops.com/install | sh
 | CI · 컨테이너 · 서버 | `CLAWOPS_API_KEY=sk_...` — OAuth 를 통째로 건너뛴다 |
 
 `clawops auth login` 은 RFC 8252 native app 흐름을 쓴다. `127.0.0.1` 의 임의 포트에
-콜백 서버를 띄우고, 서버는 `http://127.0.0.1:*/cb` 를 wildcard 로 허용한다.
+콜백 서버를 띄우고, 서버는 native 클라이언트의 loopback redirect 에서 **포트를 무시한다**
+(RFC 8252 §7.3) — 등록값은 포트 없는 `http://127.0.0.1/cb` 하나다.
 엔드포인트는 `{issuer}/.well-known/openid-configuration` 으로 discovery 하므로
 하드코딩하지 않는다.
 
