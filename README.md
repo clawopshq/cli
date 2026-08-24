@@ -9,48 +9,24 @@ clawops messages list --status failed
 clawops messages list --limit 200 --json | jq -r '.[].to' | sort | uniq -c
 ```
 
-> 현재 상태: `auth` 와 `messages` (`send` / `list` / `get`) 가 동작한다.
-> `calls` · `numbers` 는 커맨드 트리와 플래그 계약만 확정된 상태이고 실행부는
-> 미구현이다. 호출하면 뜨는 403 `insufficient_scope` 도 서버 쪽 scope 매핑이
-> 아직 안 열려서다.
+## 커맨드
 
-## 문자 보내기
+플래그와 예시는 `--help` 가 정본이다. 여기 옮겨 적으면 반드시 어긋난다.
 
 ```bash
-# SMS — --type 을 생략하면 서버 기본값 sms
-clawops messages send "서버 점검은 오늘 밤 12시부터입니다" --to 01000000000
-
-# LMS — 제목을 쓰려면 --type lms 가 필요하다
-clawops messages send --type lms --subject "이용약관 변경 안내" \
-  --body-file notice.txt --to 01000000000
-
-# MMS — 이미지 최대 3장 (jpg·jpeg·png·bmp)
-clawops messages send --type mms --to 01000000000 \
-  --media-url https://cdn.example.com/promo.jpg "신규 매장 오픈 안내"
-
-# 도착까지 확인하고 스크립트에서 분기 (실패면 exit 1)
-clawops messages send "인증번호는 482913입니다" --to 01000000000 --wait \
-  && echo "발송 확인됨"
-
-# 보내지 않고 조립된 요청만 확인
-clawops messages send "본문" --to 01000000000 --dry-run
+clawops --help
+clawops messages send --help
 ```
 
-발송 권한은 요금이 발생하므로 기본 로그인에 없다. 처음 보낼 때 403 이 뜨면
-`clawops auth refresh -s write:messages` 로 승격한다 (CLI 가 그 명령을 그대로 띄워 준다).
+| 리소스 | 하위 명령 | 상태 |
+|---|---|---|
+| `auth` | `login` · `logout` · `status` · `refresh` | 동작 |
+| `messages` | `send` · `list` · `get` | 동작 |
+| `calls` | `create` · `list` · `get` | 미구현 |
+| `numbers` | `list` | 미구현 |
 
-`--type` 은 **명시**해야 한다. 서버는 본문 길이나 첨부 유무로 타입을 추측해 올려주지
-않는다 — 그러면 사용자가 모르는 사이에 단가가 바뀌기 때문이다. 조합이 안 맞으면
-(`--type sms` 에 `--subject`) 서버가 400 으로 거절한다.
-
-수신자는 한 번에 한 명이다. 서버 API 자체가 건당 한 명만 받으므로 여러 명은 셸에서
-반복한다 — 어느 건이 실패했는지 CLI 가 뭉뚱그리지 않는다.
-
-```bash
-for n in 01000000001 01000000002; do
-  clawops messages send "공통 공지사항입니다" --to "$n" || echo "실패: $n"
-done
-```
+미구현은 커맨드 트리와 플래그 계약만 확정된 상태다. 호출하면 뜨는
+403 `insufficient_scope` 도 서버 쪽 scope 매핑이 아직 안 열려서다.
 
 ## 설치
 
@@ -67,19 +43,10 @@ curl -fsSL https://cli.claw-ops.com/install | sh
 | 로컬 개발자 | `clawops auth login` — 브라우저에서 로그인 |
 | CI · 컨테이너 · 서버 | `CLAWOPS_API_KEY=sk_...` |
 
-발신·발송 권한(`write:calls`, `write:messages`)은 실제로 요금이 발생하므로
-기본 로그인에 포함하지 않는다. 필요할 때 승격한다:
+발신·발송 권한(`write:calls`, `write:messages`)은 실제로 요금이 발생하므로 기본
+로그인에 없다. 필요한 순간 403 과 함께 승격 명령이 그대로 뜨므로 미리 외울 것은 없다.
 
-```bash
-clawops auth refresh -s write:messages
-```
-
-여러 계정을 쓴다면 프로필로 나눈다:
-
-```bash
-clawops auth login --profile sandbox
-clawops --profile sandbox calls list
-```
+계정이 여럿이면 프로필로 나눈다 (`--profile`). 프로필 하나가 계정 하나다.
 
 ## 자격증명 저장
 
