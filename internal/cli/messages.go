@@ -1,15 +1,18 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/mattn/go-runewidth"
 	"github.com/spf13/cobra"
 
 	"github.com/clawopshq/cli/internal/api"
+	"github.com/clawopshq/cli/internal/config"
 	"github.com/clawopshq/cli/internal/output"
 )
 
@@ -26,14 +29,15 @@ func newMessagesCmd() *cobra.Command {
 
 func newMessagesSendCmd() *cobra.Command {
 	var (
-		to       string
-		from     string
-		bodyFile string
-		msgType  string
-		subject  string
-		mediaURL []string
-		wait     bool
-		dryRun   bool
+		to          string
+		from        string
+		bodyFile    string
+		msgType     string
+		subject     string
+		mediaURL    []string
+		wait        bool
+		waitTimeout time.Duration
+		dryRun      bool
 	)
 	cmd := &cobra.Command{
 		Use:   "send [본문]",
@@ -51,10 +55,6 @@ func newMessagesSendCmd() *cobra.Command {
 			"  clawops messages send \"인증번호는 482913입니다\" --to 01000000000 --wait",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_, w, err := resolveContext()
-			if err != nil {
-				return err
-			}
 			body, err := readBody(args, bodyFile, cmd.InOrStdin())
 			if err != nil {
 				return err
@@ -65,15 +65,55 @@ func newMessagesSendCmd() *cobra.Command {
 			if strings.TrimSpace(to) == "" {
 				return fmt.Errorf("--to 가 필요합니다")
 			}
-			_ = w
-			_, _, _, _, _, _ = from, msgType, subject, mediaURL, wait, dryRun
 
-			// TODO(scaffold): POST /v1/accounts/{id}/messages
-			//   요청 필드는 Twilio 호환 PascalCase — To / From / Body / Type / Subject / MediaUrl.
-			//   --wait 는 종착 상태까지 폴링한다. 문자는 queued 에서 멎는 실패
-			//   모드가 실재하므로 "보냈다" 와 "도착했다" 를 구분해 exit code 로 낸다.
-			//   write:messages 스코프가 필요하다 (`clawops auth refresh -s write:messages`).
-			return notImplemented("messages send")
+			// --dry-run 은 인증도 네트워크도 타지 않는다. 조립 결과를 보여 주는 것이
+			// 전부다 — 서버가 할 검증(타입·길이·첨부 조합)을 여기서 흉내내면 CLI 가
+			// "괜찮다" 한 것을 서버가 거절하는 순간부터 아무도 CLI 를 믿지 않는다.
+			if dryRun {
+				prof, w, err := resolveContext()
+				if err != nil {
+					return err
+				}
+				p, err := buildSendParams(to, from, body, msgType, subject, mediaURL, prof)
+				if err != nil {
+					return err
+				}
+				w.Info("보내지 않았습니다 (--dry-run). 아래는 서버로 갈 요청입니다.")
+				return w.Data(p, func(out io.Writer) error { return renderSendRequest(out, p) })
+			}
+
+			client, prof, w, err := resolveClient(cmd)
+			if err != nil {
+				return err
+			}
+			p, err := buildSendParams(to, from, body, msgType, subject, mediaURL, prof)
+			if err != nil {
+				return err
+			}
+			// 403 이면 resolveClient 가 아니라 여기서 난다. api.Error 가
+			// `auth refresh -s write:messages` 승격 명령을 안내한다.
+			m, err := client.SendMessage(cmd.Context(), p)
+			if err != nil {
+				return err
+			}
+			if !wait {
+				return w.Data(m, func(out io.Writer) error { return renderMessageDetail(out, m) })
+			}
+
+			final, err := waitForTerminal(cmd.Context(), client, w, m.MessageID, waitTimeout)
+			if err != nil {
+				return err
+			}
+			if err := w.Data(final, func(out io.Writer) error {
+				return renderMessageDetail(out, final)
+			}); err != nil {
+				return err
+			}
+			// "보냈다" 와 "도착했다" 는 다르다. 종결이 failed 면 스크립트가 알아야 한다.
+			if final.Status == api.StatusFailed {
+				return &ExitError{Code: 1, Message: "발송이 실패로 종결됐습니다 (" + final.MessageID + ")"}
+			}
+			return nil
 		},
 	}
 	f := cmd.Flags()
@@ -84,8 +124,101 @@ func newMessagesSendCmd() *cobra.Command {
 	f.StringVar(&subject, "subject", "", "제목 (--type lms 또는 mms 에서만 허용)")
 	f.StringSliceVar(&mediaURL, "media-url", nil, "첨부 이미지 URL, 최대 3개 (--type mms 에서만 허용)")
 	f.BoolVar(&wait, "wait", false, "종착 상태까지 기다린다 (실패면 exit 1)")
+	f.DurationVar(&waitTimeout, "wait-timeout", defaultWaitTimeout, "--wait 의 최대 대기 시간")
 	f.BoolVar(&dryRun, "dry-run", false, "보내지 않고 조립된 요청만 출력한다")
 	return cmd
+}
+
+// --wait 의 폴링 값. 서버에 대기용 API 가 따로 없어 messages get 을 되풀이한다.
+const (
+	defaultWaitTimeout = 2 * time.Minute
+	waitFirstInterval  = 1 * time.Second
+	waitMaxInterval    = 5 * time.Second
+)
+
+// buildSendParams 는 플래그를 요청으로 조립한다.
+//
+// 타입·제목·첨부의 조합이 맞는지는 검사하지 않는다 — 서버가 판정한다. 여기서 채우는
+// 것은 CLI 만 아는 것 하나뿐이다: --from 을 생략했을 때의 프로필 기본 발신번호.
+func buildSendParams(to, from, body, msgType, subject string, mediaURL []string, prof *config.Profile) (api.SendMessageParams, error) {
+	sender := strings.TrimSpace(from)
+	if sender == "" {
+		sender = strings.TrimSpace(prof.DefaultFrom)
+	}
+	if sender == "" {
+		return api.SendMessageParams{}, fmt.Errorf(
+			"--from 이 필요합니다 (프로필 %q 에 기본 발신번호가 없습니다)", prof.Name)
+	}
+	return api.SendMessageParams{
+		To:   strings.TrimSpace(to),
+		From: sender,
+		Body: body,
+		// 서버 enum 은 소문자다. 목록과 마찬가지로 사용자가 help 에서 본 대로
+		// 쳤을 때(--type SMS) 400 이 나지 않게 요청 직전에 맞춘다.
+		Type:     strings.ToLower(strings.TrimSpace(msgType)),
+		Subject:  subject,
+		MediaURL: mediaURL,
+	}, nil
+}
+
+// waitForTerminal 은 문자가 종착 상태에 이를 때까지 상태를 되묻는다.
+//
+// 발송 API 의 200 은 "요청을 받았다" 까지다. 결과는 서버가 통신사 webhook 으로 받아
+// 나중에 sent | failed 로 종결하므로, 그때까지는 queued 다.
+func waitForTerminal(ctx context.Context, client *api.Client, w *output.Writer, messageID string, timeout time.Duration) (*api.Message, error) {
+	deadline := time.Now().Add(timeout)
+	w.Info("발송 요청됨 (%s). 종착 상태까지 기다립니다…", messageID)
+
+	interval := waitFirstInterval
+	for {
+		m, err := client.GetMessage(ctx, messageID)
+		if err != nil {
+			return nil, err
+		}
+		if api.IsTerminal(m.Status) {
+			return m, nil
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			// 종결을 못 봤다는 것이지 실패했다는 뜻이 아니다 — 단정하지 않는다.
+			return nil, &ExitError{Code: 1, Message: fmt.Sprintf(
+				"%s 안에 종착 상태에 이르지 않았습니다 (마지막 상태: %s). "+
+					"나중에 `clawops messages get %s` 로 확인하세요",
+				timeout, m.Status, messageID)}
+		}
+		// 제한 시간을 넘겨 자지 않는다 — --wait-timeout 10s 를 준 사용자가 15s 를
+		// 기다리면 그건 지킨 것이 아니다.
+		sleep := min(interval, remaining)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(sleep):
+		}
+		interval = min(interval*2, waitMaxInterval)
+	}
+}
+
+func renderSendRequest(out io.Writer, p api.SendMessageParams) error {
+	pairs := [][2]string{
+		{"수신", p.To},
+		{"발신", p.From},
+	}
+	if p.Type != "" {
+		pairs = append(pairs, [2]string{"타입", strings.ToUpper(p.Type)})
+	} else {
+		pairs = append(pairs, [2]string{"타입", "(미지정 — 서버 기본값 SMS)"})
+	}
+	if p.Subject != "" {
+		pairs = append(pairs, [2]string{"제목", p.Subject})
+	}
+	for i, u := range p.MediaURL {
+		pairs = append(pairs, [2]string{fmt.Sprintf("첨부 [%d]", i), u})
+	}
+	if err := output.KV(out, pairs); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintf(out, "\n%s\n", p.Body)
+	return err
 }
 
 func newMessagesListCmd() *cobra.Command {

@@ -4,14 +4,53 @@ ClawOps CLI — 터미널에서 전화와 문자를 다룬다.
 
 ```bash
 clawops auth login
+clawops messages send "점검 안내" --to 01000000000
 clawops messages list --status failed
 clawops messages list --limit 200 --json | jq -r '.[].to' | sort | uniq -c
 ```
 
-> 현재 상태: `auth` 와 `messages list` / `messages get` 이 동작한다.
-> `messages send` · `calls` · `numbers` 는 커맨드 트리와 플래그 계약만 확정된
-> 상태이고 실행부는 미구현이다. `calls` / `numbers` 를 호출하면 뜨는
-> 403 `insufficient_scope` 도 서버 쪽 scope 매핑이 아직 안 열려서다.
+> 현재 상태: `auth` 와 `messages` (`send` / `list` / `get`) 가 동작한다.
+> `calls` · `numbers` 는 커맨드 트리와 플래그 계약만 확정된 상태이고 실행부는
+> 미구현이다. 호출하면 뜨는 403 `insufficient_scope` 도 서버 쪽 scope 매핑이
+> 아직 안 열려서다.
+
+## 문자 보내기
+
+```bash
+# SMS — --type 을 생략하면 서버 기본값 sms
+clawops messages send "서버 점검은 오늘 밤 12시부터입니다" --to 01000000000
+
+# LMS — 제목을 쓰려면 --type lms 가 필요하다
+clawops messages send --type lms --subject "이용약관 변경 안내" \
+  --body-file notice.txt --to 01000000000
+
+# MMS — 이미지 최대 3장 (jpg·jpeg·png·bmp)
+clawops messages send --type mms --to 01000000000 \
+  --media-url https://cdn.example.com/promo.jpg "신규 매장 오픈 안내"
+
+# 도착까지 확인하고 스크립트에서 분기 (실패면 exit 1)
+clawops messages send "인증번호는 482913입니다" --to 01000000000 --wait \
+  && echo "발송 확인됨"
+
+# 보내지 않고 조립된 요청만 확인
+clawops messages send "본문" --to 01000000000 --dry-run
+```
+
+발송 권한은 요금이 발생하므로 기본 로그인에 없다. 처음 보낼 때 403 이 뜨면
+`clawops auth refresh -s write:messages` 로 승격한다 (CLI 가 그 명령을 그대로 띄워 준다).
+
+`--type` 은 **명시**해야 한다. 서버는 본문 길이나 첨부 유무로 타입을 추측해 올려주지
+않는다 — 그러면 사용자가 모르는 사이에 단가가 바뀌기 때문이다. 조합이 안 맞으면
+(`--type sms` 에 `--subject`) 서버가 400 으로 거절한다.
+
+수신자는 한 번에 한 명이다. 서버 API 자체가 건당 한 명만 받으므로 여러 명은 셸에서
+반복한다 — 어느 건이 실패했는지 CLI 가 뭉뚱그리지 않는다.
+
+```bash
+for n in 01000000001 01000000002; do
+  clawops messages send "공통 공지사항입니다" --to "$n" || echo "실패: $n"
+done
+```
 
 ## 설치
 

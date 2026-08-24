@@ -23,6 +23,54 @@ type Message struct {
 	DateUpdated *string  `json:"dateUpdated"`
 }
 
+// 발신 문자의 상태값. 서버 enum 그대로다.
+const (
+	StatusQueued = "queued"
+	StatusSent   = "sent"
+	StatusFailed = "failed"
+)
+
+// IsTerminal 은 발신 문자가 더 바뀌지 않는 상태인지 알려준다.
+//
+// 서버는 발송 결과를 webhook 으로 받아 sent | failed 로만 종결하고, 그 뒤의 전이를
+// DB CAS(`WHERE status NOT IN (sent, failed)`)로 막는다. queued 는 아직 결과가 오지
+// 않은 것이다. 수신거부는 여기 끼지 않는다 — 422 로 거절되고 이력 자체가 남지 않는다.
+//
+// 이건 "판단" 이 아니라 서버 status enum 을 읽는 것이다. 무엇을 sent 로 볼지는
+// 여전히 서버가 정하고, CLI 는 그 값이 종결인지만 본다.
+func IsTerminal(status string) bool {
+	return status == StatusSent || status == StatusFailed
+}
+
+// SendMessageParams 는 POST /messages 의 요청 본문이다.
+// 필드명이 Twilio 호환 PascalCase 라 태그로 고정한다 (Go 이름과 다르다).
+//
+// Type 이 비면 서버 기본값 sms 다. 본문 길이나 첨부를 보고 CLI 가 채우지 않는다 —
+// 서버(resolveMessageType)도 REST 계약에서는 명시값을 그대로 쓰고 길이로 승격하지
+// 않는다. 추측해서 올리면 사용자가 모르는 사이에 단가가 바뀐다.
+type SendMessageParams struct {
+	To       string   `json:"To"`
+	From     string   `json:"From"`
+	Body     string   `json:"Body"`
+	Type     string   `json:"Type,omitempty"`
+	Subject  string   `json:"Subject,omitempty"`
+	MediaURL []string `json:"MediaUrl,omitempty"`
+}
+
+// SendMessage 는 문자 한 건을 발송 요청한다. 성공하면 201 의 MessageResponse 다.
+//
+// 이 라우트는 수신자를 한 명만 받는다. 여러 명은 호출측이 반복한다 — 부분 실패를
+// 어떻게 집계할지는 CLI 가 정할 문제가 아니다.
+//
+// 응답의 status 는 대개 queued 다. "요청을 받았다" 이지 "도착했다" 가 아니다.
+func (c *Client) SendMessage(ctx context.Context, p SendMessageParams) (*Message, error) {
+	var m Message
+	if err := c.Do(ctx, "POST", "/messages", nil, p, &m); err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
 // MessageListParams 는 GET /messages 의 필터다.
 //
 // 서버가 지원하는 것만 둔다. 시간 범위 필터는 이 라우트에 없으므로 --since 류를
