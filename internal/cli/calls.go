@@ -99,26 +99,3 @@ func newCallsGetCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&withEvents, "events", false, "통화 이벤트를 함께 가져온다")
 	return cmd
 }
-
-func newNumbersCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:     "numbers",
-		Aliases: []string{"number"},
-		Short:   "전화번호 조회·관리",
-		RunE:    groupRunE,
-	}
-	list := &cobra.Command{
-		Use:     "list",
-		Aliases: []string{"ls"},
-		Short:   "보유 번호를 조회한다",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			_, _, err := resolveContext()
-			if err != nil {
-				return err
-			}
-			return notImplemented("numbers list")
-		},
-	}
-	cmd.AddCommand(list)
-	return cmd
-}
