@@ -27,11 +27,11 @@ clawops messages send --help
 
 미구현은 커맨드 트리와 플래그 계약만 확정된 상태다.
 
-`numbers` 는 CLI 를 붙여도 아직 못 쓴다. **REST 의 numbers 라우트가 OIDC
-access token 을 받지 않는다** — `read:phone_numbers` 를 가진 토큰으로 불러도
-403 `접근 권한 없음` 이다(같은 토큰으로 `messages` 는 된다). 스코프 부족이
-아니라 라우트가 API 키 경로에만 있는 것이라, `WWW-Authenticate` 에 scope 힌트도
-없어서 CLI 가 승격 명령을 안내하지 못한다. 서버에서 먼저 열어야 한다.
+`numbers` 는 CLI 를 붙여도 아직 못 쓴다. 서버의 REST scope 매핑
+(`auth/scope-map.ts`)이 **deny by default** 인데 아직 Messages 만 올라가 있어,
+`read:phone_numbers` 를 가진 토큰으로 불러도 403 이다. 미매핑이라 서버가 무엇이
+필요한지 모르므로 `WWW-Authenticate` 에 `scope="..."` 힌트가 없고, 그래서 CLI 의
+승격 안내도 뜨지 않는다. 서버 매핑이 먼저 열려야 한다.
 
 ## 설치
 
