@@ -31,7 +31,7 @@ func newMessagesSendCmd() *cobra.Command {
 		bodyFile string
 		subject  string
 		mediaURL []string
-		watch    bool
+		wait     bool
 		dryRun   bool
 	)
 	cmd := &cobra.Command{
@@ -42,7 +42,7 @@ func newMessagesSendCmd() *cobra.Command {
 			"길이와 첨부에 따라 SMS/LMS/MMS 는 서버가 판정한다 — CLI 가 추측하지 않는다.",
 		Example: "  clawops messages send \"점검 안내\" --to 01000000000\n" +
 			"  echo \"본문\" | clawops messages send --to 01000000000\n" +
-			"  clawops messages send --body-file notice.txt --to 01000000000 --watch",
+			"  clawops messages send --body-file notice.txt --to 01000000000 --wait",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, w, err := resolveContext()
@@ -60,11 +60,11 @@ func newMessagesSendCmd() *cobra.Command {
 				return fmt.Errorf("--to 가 필요합니다")
 			}
 			_ = w
-			_, _, _, _, _ = from, subject, mediaURL, watch, dryRun
+			_, _, _, _, _ = from, subject, mediaURL, wait, dryRun
 
 			// TODO(scaffold): POST /v1/accounts/{id}/messages
 			//   요청 필드는 Twilio 호환 PascalCase — To / From / Body / Type / Subject / MediaUrl.
-			//   --watch 는 종착 상태까지 폴링한다. 문자는 queued 에서 멎는 실패
+			//   --wait 는 종착 상태까지 폴링한다. 문자는 queued 에서 멎는 실패
 			//   모드가 실재하므로 "보냈다" 와 "도착했다" 를 구분해 exit code 로 낸다.
 			//   write:messages 스코프가 필요하다 (`clawops auth refresh -s write:messages`).
 			return notImplemented("messages send")
@@ -76,7 +76,7 @@ func newMessagesSendCmd() *cobra.Command {
 	f.StringVar(&bodyFile, "body-file", "", "본문을 파일에서 읽는다")
 	f.StringVar(&subject, "subject", "", "LMS/MMS 제목")
 	f.StringSliceVar(&mediaURL, "media-url", nil, "MMS 첨부 URL")
-	f.BoolVar(&watch, "watch", false, "종착 상태까지 기다린다 (실패면 exit 1)")
+	f.BoolVar(&wait, "wait", false, "종착 상태까지 기다린다 (실패면 exit 1)")
 	f.BoolVar(&dryRun, "dry-run", false, "보내지 않고 검증만 한다")
 	return cmd
 }

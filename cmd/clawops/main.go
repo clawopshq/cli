@@ -24,7 +24,7 @@ func main() {
 	defer stop()
 
 	if err := cli.Execute(ctx, cli.BuildInfo{Version: version, Commit: commit, Date: date}); err != nil {
-		// cli.ExitError 는 종료 코드를 직접 지정한다 (예: --watch 실패 = 1).
+		// cli.ExitError 는 종료 코드를 직접 지정한다 (예: --wait 실패 = 1).
 		var ee *cli.ExitError
 		if errors.As(err, &ee) {
 			if ee.Message != "" {

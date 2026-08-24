@@ -22,7 +22,7 @@ func newCallsCreateCmd() *cobra.Command {
 		agentID    string
 		callFlowID string
 		timeout    int
-		watch      bool
+		wait       bool
 	)
 	cmd := &cobra.Command{
 		Use:   "create",
@@ -30,13 +30,13 @@ func newCallsCreateCmd() *cobra.Command {
 		Long: "발신한다. 통화 내용은 --url(VoiceML), --agent, --flow 중 하나로 지정한다.\n\n" +
 			"수신 차단(DNC) 검사는 서버의 createCall 관문에서 이뤄진다 — CLI 는 흉내내지 않는다.",
 		Example: "  clawops calls create --to 01000000000 --agent AG00000000\n" +
-			"  clawops calls create --to 01000000000 --url https://example.com/voice --watch",
+			"  clawops calls create --to 01000000000 --url https://example.com/voice --wait",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, _, err := resolveContext()
 			if err != nil {
 				return err
 			}
-			_, _, _, _, _, _, _ = to, from, url, agentID, callFlowID, timeout, watch
+			_, _, _, _, _, _, _ = to, from, url, agentID, callFlowID, timeout, wait
 			// TODO(scaffold): POST /v1/accounts/{id}/calls — To/From/Url/AgentId/CallFlowId/Timeout.
 			return notImplemented("calls create")
 		},
@@ -48,7 +48,7 @@ func newCallsCreateCmd() *cobra.Command {
 	f.StringVar(&agentID, "agent", "", "AI 에이전트 ID")
 	f.StringVar(&callFlowID, "flow", "", "콜플로우 ID")
 	f.IntVar(&timeout, "timeout", 0, "응답 대기 초")
-	f.BoolVar(&watch, "watch", false, "통화가 끝날 때까지 상태를 따라간다")
+	f.BoolVar(&wait, "wait", false, "통화가 끝날 때까지 기다린다 (실패면 exit 1)")
 	return cmd
 }
 
