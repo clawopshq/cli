@@ -57,8 +57,19 @@ clawops --profile sandbox calls list
 | 위치 | 내용 |
 |---|---|
 | OS 키체인 (macOS Keychain / libsecret / wincred) | access · refresh token |
-| `~/.config/clawops/config.toml` (0600) | 프로필 · issuer · account_id · 기본 발신번호 |
-| `~/.config/clawops/credentials.json` (0600) | 키체인을 쓸 수 없을 때만 (헤드리스 리눅스 등) |
+| `{config}/clawops/config.toml` (0600) | 프로필 · issuer · account_id · 기본 발신번호 |
+| `{config}/clawops/credentials.json` (0600) | 키체인을 쓸 수 없을 때만 (헤드리스 리눅스 등) |
+
+`{config}` 는 Go 의 `os.UserConfigDir()` 이 정하는 OS 별 표준 설정 디렉터리다.
+
+| OS | 실제 경로 |
+|---|---|
+| macOS | `~/Library/Application Support/clawops/` |
+| Linux | `$XDG_CONFIG_HOME/clawops/` (미설정 시 `~/.config/clawops/`) |
+| Windows | `%AppData%\clawops\` |
+
+⚠️ macOS 에서 `~/.config/clawops/` 를 보고 "설정이 없다 = 로그인한 적 없다" 고
+판단하지 말 것. 경로를 직접 쓰는 대신 `clawops auth status` 로 확인한다.
 
 설정 파일에는 토큰을 넣지 않는다. `auth status` 로 프로필을 확인하는 데 키체인을
 열 필요가 없고, 설정 파일을 실수로 공유해도 자격증명이 새지 않는다.

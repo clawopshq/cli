@@ -98,7 +98,9 @@ func DeleteToken(profile string) error {
 	return firstErr
 }
 
-// --- 폴백 파일 (~/.config/clawops/credentials.json, 0600) ---
+// --- 폴백 파일 (os.UserConfigDir()/clawops/credentials.json, 0600) ---
+//
+// macOS 에서는 ~/Library/Application Support/clawops/ 다. ~/.config 가 아니다.
 
 func credentialsPath() (string, error) {
 	dir, err := Dir()
