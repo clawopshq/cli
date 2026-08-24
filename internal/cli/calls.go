@@ -9,6 +9,7 @@ func newCallsCmd() *cobra.Command {
 		Use:     "calls",
 		Aliases: []string{"call"},
 		Short:   "발신·통화 조회",
+		RunE:    groupRunE,
 	}
 	cmd.AddCommand(newCallsCreateCmd(), newCallsListCmd(), newCallsGetCmd())
 	return cmd
@@ -104,6 +105,7 @@ func newNumbersCmd() *cobra.Command {
 		Use:     "numbers",
 		Aliases: []string{"number"},
 		Short:   "전화번호 조회·관리",
+		RunE:    groupRunE,
 	}
 	list := &cobra.Command{
 		Use:     "list",

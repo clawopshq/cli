@@ -18,6 +18,7 @@ func newMessagesCmd() *cobra.Command {
 		Use:     "messages",
 		Aliases: []string{"message", "msg"},
 		Short:   "문자 발송·조회 (SMS/LMS/MMS)",
+		RunE:    groupRunE,
 	}
 	cmd.AddCommand(newMessagesSendCmd(), newMessagesListCmd(), newMessagesGetCmd())
 	return cmd
@@ -91,22 +92,29 @@ func newMessagesListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
-		Short:   "문자 목록을 조회한다",
+		Short:   "문자 목록을 본다",
 		Long: "문자 목록을 최신순으로 가져온다.\n\n" +
-			"--limit 은 총 가져올 건수다. 서버 한 페이지 상한(100)을 넘으면 여러 번\n" +
-			"나눠 요청해 채운다. --page-size 는 그 요청 단위를 직접 정하고 싶을 때만 쓴다.",
-		Example: "  clawops messages list --status failed\n" +
-			"  clawops messages list --limit 200 --json | jq -r '.[].to'\n" +
-			"  clawops messages list --number 01000000000 --type lms",
+			"--limit 은 가져올 총 건수다 (기본 20). 100 건을 넘으면 나눠서 요청해 채우므로\n" +
+			"페이지를 직접 넘길 필요가 없다.\n\n" +
+			"--status 와 --type 은 대소문자를 가리지 않는다 (SMS 도 sms 도 된다).",
+		Example: "  clawops messages list                          최근 20건\n" +
+			"  clawops messages list --status failed          실패한 것만\n" +
+			"  clawops messages list --number 01000000000     특정 번호가 오간 문자\n" +
+			"  clawops messages list --limit 200 --json | jq -r '.[].to'",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if limit < 1 {
+				return fmt.Errorf("--limit 은 1 이상이어야 합니다 (받은 값: %d)", limit)
+			}
 			client, _, w, err := resolveClient(cmd)
 			if err != nil {
 				return err
 			}
 			msgs, err := client.ListMessages(cmd.Context(), api.MessageListParams{
-				Status:   status,
-				Type:     typ,
-				Number:   number,
+				// 서버 enum 은 소문자다. 표는 SMS 처럼 대문자로 보여주고 help 도 그렇게
+				// 읽히므로, 사용자가 본 대로 쳤을 때 400 이 나지 않게 여기서 맞춰 준다.
+				Status:   strings.ToLower(strings.TrimSpace(status)),
+				Type:     strings.ToLower(strings.TrimSpace(typ)),
+				Number:   strings.TrimSpace(number),
 				Limit:    limit,
 				PageSize: pageSize,
 			})
@@ -123,26 +131,32 @@ func newMessagesListCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&status, "status", "", "상태 필터 (queued|sent|failed|received)")
-	f.StringVar(&number, "number", "", "번호 필터 (발신·수신 어느 쪽이든)")
-	f.StringVar(&typ, "type", "", "SMS | LMS | MMS")
+	f.StringVar(&status, "status", "", "상태 (queued|sent|failed|received)")
+	f.StringVar(&typ, "type", "", "종류 (sms|lms|mms)")
+	f.StringVar(&number, "number", "", "번호 (발신·수신 어느 쪽이든)")
 	f.IntVar(&limit, "limit", 20, "가져올 총 건수")
-	f.IntVar(&pageSize, "page-size", 0, "요청당 건수 (기본: limit 과 100 중 작은 값)")
+	f.IntVar(&pageSize, "page-size", 0, "요청 한 번에 받을 건수 (고급)")
 	return cmd
 }
 
 func newMessagesGetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "get <message-id>",
-		Short:   "문자 한 건을 조회한다",
+		Short:   "문자 한 건을 자세히 본다",
 		Example: "  clawops messages get MG00000000000000000000000000000000",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			id := strings.TrimSpace(args[0])
+			// 빈 ID 를 그대로 보내면 /messages/ 가 되어 목록 라우트에 걸리고,
+			// 빈 상세 화면이 성공(exit 0)처럼 보인다.
+			if id == "" {
+				return fmt.Errorf("메시지 ID 가 비어 있습니다")
+			}
 			client, _, w, err := resolveClient(cmd)
 			if err != nil {
 				return err
 			}
-			m, err := client.GetMessage(cmd.Context(), args[0])
+			m, err := client.GetMessage(cmd.Context(), id)
 			if err != nil {
 				return err
 			}

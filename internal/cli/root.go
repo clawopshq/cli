@@ -63,10 +63,15 @@ func newRootCmd(info BuildInfo) *cobra.Command {
 		Use:   "clawops",
 		Short: "ClawOps — 터미널에서 전화와 문자를 다룬다",
 		Long: "clawops 는 ClawOps API 를 터미널에서 쓰는 공식 CLI 다.\n\n" +
-			"인증:\n" +
-			"  clawops auth login              브라우저로 로그인 (기본)\n" +
-			"  CLAWOPS_API_KEY=sk_...          비대화형 환경 (CI, 컨테이너)\n\n" +
-			"환경변수가 있으면 OAuth 를 건너뛴다.",
+			"시작하기:\n" +
+			"  clawops auth login              브라우저로 로그인\n" +
+			"  clawops auth status             지금 누구로 붙어 있는지\n" +
+			"  clawops messages list           최근 문자 보기\n\n" +
+			"CI·컨테이너처럼 브라우저가 없는 곳에서는 CLAWOPS_API_KEY=sk_... 를 쓴다\n" +
+			"(환경변수가 있으면 OAuth 를 건너뛴다).\n\n" +
+			"--json 을 붙이면 결과가 stdout 에 JSON 으로만 나가므로 jq 로 바로 넘길 수 있다.",
+		Example: "  clawops messages list --status failed\n" +
+			"  clawops messages list --limit 200 --json | jq -r '.[].to' | sort | uniq -c",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       fmt.Sprintf("%s (%s, %s)", info.Version, info.Commit, info.Date),
@@ -140,6 +145,18 @@ func resolveClient(cmd *cobra.Command) (*api.Client, *config.Profile, *output.Wr
 		Notify:  func(format string, args ...any) { w.Info(format, args...) },
 	}
 	return api.New(prof.APIBase, prof.AccountID, ts, "clawops-cli/"+buildVersion), prof, w, nil
+}
+
+// groupRunE 는 하위 명령을 묶기만 하는 커맨드의 동작이다.
+//
+// cobra 는 기본적으로 알 수 없는 인자를 받아도 도움말을 보여주고 **0 으로 끝난다**.
+// `clawops messages lst` 같은 오타가 스크립트에서 성공으로 보이므로 직접 거절한다.
+func groupRunE(cmd *cobra.Command, args []string) error {
+	if len(args) > 0 {
+		return fmt.Errorf("알 수 없는 하위 명령 %q — `%s --help` 로 사용법을 볼 수 있습니다",
+			args[0], cmd.CommandPath())
+	}
+	return cmd.Help()
 }
 
 // notImplemented 는 아직 배선되지 않은 커맨드가 돌려주는 에러다.
