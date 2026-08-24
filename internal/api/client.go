@@ -144,22 +144,70 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 	return json.Unmarshal(raw, out)
 }
 
+// parseError 는 서버가 돌려준 오류 본문을 사람이 읽을 문장으로 만든다.
+//
+// ⚠️ `error` 는 **문자열**이다 — 객체가 아니다. 검증이 두 층이라 형태가 둘인데
+// 둘 다 문자열을 쓴다:
+//
+//	업무 규칙 위반(service):  {"error":"메시지를 찾을 수 없습니다"}
+//	형식 위반(validator):     {"error":"request/query/status must be ...",
+//	                           "errors":[{"path":"/query/status","message":"..."}],
+//	                           "code":"VALIDATION"}
+//
+// 객체로 파싱하려 들면 타입 불일치로 통째로 실패해 JSON 원문이 그대로 사용자에게
+// 노출된다. 옛 구현이 실제로 그랬다. 혹시 모를 객체 형태도 함께 받아 둔다.
 func parseError(status int, raw []byte) error {
 	e := &Error{StatusCode: status, Raw: raw}
+
 	var envelope struct {
-		Error struct {
-			Code    string `json:"code"`
+		Error  json.RawMessage `json:"error"`
+		Errors []struct {
+			Path    string `json:"path"`
 			Message string `json:"message"`
-		} `json:"error"`
+		} `json:"errors"`
+		Code    string `json:"code"`
 		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(raw, &envelope); err == nil {
-		e.Code = envelope.Error.Code
-		e.Message = envelope.Error.Message
+		e.Code = envelope.Code
+
+		var asString string
+		if err := json.Unmarshal(envelope.Error, &asString); err == nil {
+			e.Message = asString
+		} else {
+			var asObject struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			}
+			if err := json.Unmarshal(envelope.Error, &asObject); err == nil {
+				e.Message = asObject.Message
+				if e.Code == "" {
+					e.Code = asObject.Code
+				}
+			}
+		}
 		if e.Message == "" {
 			e.Message = envelope.Message
 		}
+
+		// validator 의 필드별 위반은 어느 파라미터가 문제인지 말해 준다.
+		// "request/query/status must be ..." 라는 통짜 문장보다 이쪽이 쓸모 있다.
+		if len(envelope.Errors) > 0 {
+			parts := make([]string, 0, len(envelope.Errors))
+			for _, v := range envelope.Errors {
+				field := strings.TrimPrefix(v.Path, "/query/")
+				field = strings.TrimPrefix(field, "/body/")
+				field = strings.TrimPrefix(field, "/")
+				if field == "" {
+					parts = append(parts, v.Message)
+					continue
+				}
+				parts = append(parts, fmt.Sprintf("%s: %s", field, v.Message))
+			}
+			e.Message = strings.Join(parts, "; ")
+		}
 	}
+
 	if e.Message == "" {
 		e.Message = strings.TrimSpace(string(raw))
 	}
