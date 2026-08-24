@@ -6,7 +6,11 @@ import (
 	"os"
 	"strings"
 
+	"github.com/mattn/go-runewidth"
 	"github.com/spf13/cobra"
+
+	"github.com/learners-superpumped/clawops-cli/internal/api"
+	"github.com/learners-superpumped/clawops-cli/internal/output"
 )
 
 func newMessagesCmd() *cobra.Command {
@@ -61,6 +65,7 @@ func newMessagesSendCmd() *cobra.Command {
 			//   요청 필드는 Twilio 호환 PascalCase — To / From / Body / Type / Subject / MediaUrl.
 			//   --watch 는 종착 상태까지 폴링한다. 문자는 queued 에서 멎는 실패
 			//   모드가 실재하므로 "보냈다" 와 "도착했다" 를 구분해 exit code 로 낸다.
+			//   write:messages 스코프가 필요하다 (`clawops auth refresh -s write:messages`).
 			return notImplemented("messages send")
 		},
 	}
@@ -77,45 +82,169 @@ func newMessagesSendCmd() *cobra.Command {
 
 func newMessagesListCmd() *cobra.Command {
 	var (
-		status string
-		number string
-		typ    string
-		limit  int
+		status   string
+		number   string
+		typ      string
+		limit    int
+		pageSize int
 	)
 	cmd := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "문자 목록을 조회한다",
-		Example: "  clawops messages list --status failed --json | jq '.[].to'",
+		Long: "문자 목록을 최신순으로 가져온다.\n\n" +
+			"--limit 은 총 가져올 건수다. 서버 한 페이지 상한(100)을 넘으면 여러 번\n" +
+			"나눠 요청해 채운다. --page-size 는 그 요청 단위를 직접 정하고 싶을 때만 쓴다.",
+		Example: "  clawops messages list --status failed\n" +
+			"  clawops messages list --limit 200 --json | jq -r '.[].to'\n" +
+			"  clawops messages list --number 01000000000 --type lms",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_, _, err := resolveContext()
+			client, _, w, err := resolveClient(cmd)
 			if err != nil {
 				return err
 			}
-			_, _, _, _ = status, number, typ, limit
-			// TODO(scaffold): GET /v1/accounts/{id}/messages
-			//   페이지네이션 파라미터가 라우트마다 다르다(pageSize/page_size/limit/page).
-			//   공통 파서로 통일하지 말고 이 라우트의 계약을 그대로 따른다.
-			return notImplemented("messages list")
+			msgs, err := client.ListMessages(cmd.Context(), api.MessageListParams{
+				Status:   status,
+				Type:     typ,
+				Number:   number,
+				Limit:    limit,
+				PageSize: pageSize,
+			})
+			if err != nil {
+				return err
+			}
+			if len(msgs) == 0 {
+				w.Info("조건에 맞는 문자가 없습니다.")
+			}
+			// JSON 은 배열 그대로 — `... --json | jq -r '.[].to'` 가 바로 되게 한다.
+			return w.Data(msgs, func(out io.Writer) error {
+				return renderMessageTable(out, msgs)
+			})
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&status, "status", "", "상태 필터")
-	f.StringVar(&number, "number", "", "번호 필터")
+	f.StringVar(&status, "status", "", "상태 필터 (queued|sent|failed|received)")
+	f.StringVar(&number, "number", "", "번호 필터 (발신·수신 어느 쪽이든)")
 	f.StringVar(&typ, "type", "", "SMS | LMS | MMS")
-	f.IntVar(&limit, "limit", 20, "가져올 개수")
+	f.IntVar(&limit, "limit", 20, "가져올 총 건수")
+	f.IntVar(&pageSize, "page-size", 0, "요청당 건수 (기본: limit 과 100 중 작은 값)")
 	return cmd
 }
 
 func newMessagesGetCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "get <message-id>",
-		Short: "문자 한 건을 조회한다",
-		Args:  cobra.ExactArgs(1),
+		Use:     "get <message-id>",
+		Short:   "문자 한 건을 조회한다",
+		Example: "  clawops messages get MG00000000000000000000000000000000",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return notImplemented("messages get")
+			client, _, w, err := resolveClient(cmd)
+			if err != nil {
+				return err
+			}
+			m, err := client.GetMessage(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			return w.Data(m, func(out io.Writer) error {
+				return renderMessageDetail(out, m)
+			})
 		},
 	}
+}
+
+// renderMessageTable 은 목록을 한 줄에 한 건씩 낸다.
+//
+// body 는 개행과 긴 본문이 흔해 표를 무너뜨리므로 한 줄로 접고 잘라 낸다.
+// 전문이 필요하면 `messages get` 이나 --json 을 쓴다.
+func renderMessageTable(out io.Writer, msgs []api.Message) error {
+	headers := []string{"MESSAGE ID", "방향", "FROM", "TO", "타입", "상태", "생성", "본문"}
+	rows := make([][]string, 0, len(msgs))
+	for _, m := range msgs {
+		rows = append(rows, []string{
+			m.MessageID,
+			directionLabel(m.Direction),
+			m.From,
+			m.To,
+			strings.ToUpper(m.Type),
+			m.Status,
+			shortTime(m.DateCreated),
+			truncate(oneLine(deref(m.Body)), 30),
+		})
+	}
+	return output.Table(out, headers, rows)
+}
+
+func renderMessageDetail(out io.Writer, m *api.Message) error {
+	pairs := [][2]string{
+		{"ID", m.MessageID},
+		{"방향", directionLabel(m.Direction)},
+		{"상태", m.Status},
+		{"타입", strings.ToUpper(m.Type)},
+		{"발신", m.From},
+		{"수신", m.To},
+	}
+	if s := deref(m.Subject); s != "" {
+		pairs = append(pairs, [2]string{"제목", s})
+	}
+	pairs = append(pairs, [2]string{"생성", m.DateCreated})
+	if u := deref(m.DateUpdated); u != "" {
+		pairs = append(pairs, [2]string{"갱신", u})
+	}
+	if m.NumMedia > 0 {
+		pairs = append(pairs, [2]string{"첨부", fmt.Sprintf("%d개", m.NumMedia)})
+		for i, u := range m.MediaURL {
+			pairs = append(pairs, [2]string{fmt.Sprintf("  [%d]", i), u})
+		}
+	}
+	if err := output.KV(out, pairs); err != nil {
+		return err
+	}
+	// 본문은 표에 섞지 않고 아래에 원문 그대로 — 개행이 살아 있어야 읽을 수 있다.
+	if b := deref(m.Body); b != "" {
+		if _, err := fmt.Fprintf(out, "\n%s\n", b); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func directionLabel(d string) string {
+	switch d {
+	case "outbound":
+		return "발신"
+	case "inbound":
+		return "수신"
+	default:
+		return d
+	}
+}
+
+// shortTime 은 ISO 8601 에서 날짜와 분까지만 남긴다 (표 폭을 아끼려고).
+func shortTime(s string) string {
+	if len(s) >= 16 {
+		return strings.Replace(s[:16], "T", " ", 1)
+	}
+	return s
+}
+
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// truncate 는 표시 폭 기준으로 자른다 — 한글은 한 글자가 두 칸이다.
+func truncate(s string, width int) string {
+	if runewidth.StringWidth(s) <= width {
+		return s
+	}
+	return runewidth.Truncate(s, width, "…")
+}
+
+func deref(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 // readBody 는 본문을 위치 인자 → --body-file → stdin 순으로 읽는다.

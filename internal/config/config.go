@@ -1,8 +1,8 @@
 // Package config 는 프로필과 자격증명을 읽고 쓴다.
 //
-// 저장 위치:
-//   - 설정 (프로필, issuer, 기본 발신번호):  ~/.config/clawops/config.toml
-//   - 토큰 (access/refresh):                 OS 키체인. 폴백은 credentials.json (0600)
+// 저장 위치 (Dir() = os.UserConfigDir()/clawops — macOS 는 ~/Library/Application Support):
+//   - 설정 (프로필, issuer, api_base, 기본 발신번호):  <Dir>/config.toml
+//   - 토큰 (access/refresh):                          OS 키체인. 폴백은 credentials.json (0600)
 //
 // 토큰에는 실제로 요금이 발생하는 발신 권한이 붙어 있다. 평문 파일을 기본값으로
 // 두지 않는다 — 키체인이 없을 때만 0600 파일로 내려간다.
@@ -24,6 +24,7 @@ const (
 	EnvAPIKey  = "CLAWOPS_API_KEY"
 	EnvProfile = "CLAWOPS_PROFILE"
 	EnvIssuer  = "CLAWOPS_ISSUER"
+	EnvAPIBase = "CLAWOPS_API_BASE"
 
 	DefaultProfile = "default"
 
@@ -31,6 +32,10 @@ const (
 	// api.claw-ops.com 에도 discovery alias 가 있지만 그쪽은 issuer 로
 	// auth.claw-ops.com 을 돌려주므로 §4.3 을 어긴다 — 정본 호스트를 쓴다.
 	DefaultIssuer = "https://auth.claw-ops.com"
+
+	// DefaultAPIBase 는 REST API 의 호스트다. issuer 와 다른 호스트이고 discovery
+	// 문서에도 실리지 않으므로(거기 있는 것은 인가 서버의 엔드포인트들이다) 별도로 둔다.
+	DefaultAPIBase = "https://api.claw-ops.com"
 
 	// CLIClientID 는 서버에 시드된 public client. secret 이 없고 PKCE S256 만 쓴다.
 	CLIClientID = "clawops-cli"
@@ -44,6 +49,7 @@ const (
 type Profile struct {
 	Name      string `toml:"-"`
 	Issuer    string `toml:"issuer,omitempty"`
+	APIBase   string `toml:"api_base,omitempty"`
 	AccountID string `toml:"account_id,omitempty"`
 	// DefaultFrom 이 있으면 messages/calls 의 --from 을 생략할 수 있다.
 	DefaultFrom string `toml:"default_from,omitempty"`
@@ -87,6 +93,12 @@ func Load(name string) (*Profile, error) {
 	}
 	if v := os.Getenv(EnvIssuer); v != "" {
 		p.Issuer = v
+	}
+	if p.APIBase == "" {
+		p.APIBase = DefaultAPIBase
+	}
+	if v := os.Getenv(EnvAPIBase); v != "" {
+		p.APIBase = v
 	}
 	if key := os.Getenv(EnvAPIKey); key != "" {
 		p.APIKey = key

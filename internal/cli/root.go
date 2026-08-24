@@ -13,7 +13,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/learners-superpumped/clawops-cli/internal/api"
 	"github.com/learners-superpumped/clawops-cli/internal/config"
+	"github.com/learners-superpumped/clawops-cli/internal/oauth"
 	"github.com/learners-superpumped/clawops-cli/internal/output"
 )
 
@@ -37,14 +39,21 @@ type globalFlags struct {
 	profile string
 	format  string // table | json
 	issuer  string // discovery 대상 오버라이드 (dev/staging)
+	apiBase string // REST 호스트 오버라이드 (dev/staging)
 	noColor bool
 	quiet   bool
 }
 
 var g globalFlags
 
+// buildVersion 은 User-Agent 에 싣는다. main 이 ldflags 로 받은 값을 Execute 가 채운다.
+var buildVersion = "dev"
+
 // Execute 는 루트 커맨드를 만들고 실행한다.
 func Execute(ctx context.Context, info BuildInfo) error {
+	if info.Version != "" {
+		buildVersion = info.Version
+	}
 	root := newRootCmd(info)
 	return root.ExecuteContext(ctx)
 }
@@ -67,6 +76,7 @@ func newRootCmd(info BuildInfo) *cobra.Command {
 	pf.StringVar(&g.profile, "profile", "", "사용할 프로필 (기본: default 또는 CLAWOPS_PROFILE)")
 	pf.StringVar(&g.format, "format", "table", "출력 형식: table | json")
 	pf.StringVar(&g.issuer, "issuer", "", "OIDC issuer 오버라이드 (dev/staging 용)")
+	pf.StringVar(&g.apiBase, "api-base", "", "REST API 호스트 오버라이드 (dev/staging 용)")
 	pf.BoolVar(&g.noColor, "no-color", false, "색 출력 비활성화")
 	pf.BoolVarP(&g.quiet, "quiet", "q", false, "사람용 출력 억제 (에러는 stderr 로 유지)")
 
@@ -98,11 +108,38 @@ func resolveContext() (*config.Profile, *output.Writer, error) {
 	if g.issuer != "" {
 		prof.Issuer = g.issuer
 	}
+	if g.apiBase != "" {
+		prof.APIBase = g.apiBase
+	}
 	w, err := output.New(g.format, output.Options{NoColor: g.noColor, Quiet: g.quiet})
 	if err != nil {
 		return nil, nil, err
 	}
 	return prof, w, nil
+}
+
+// resolveClient 는 인증까지 마친 API 클라이언트를 만든다.
+//
+// TokenSource 가 API 키와 OAuth 토큰을 같은 인터페이스로 감추므로 호출부는 어느
+// 자격증명으로 도는지 알 필요가 없다. 계정 ID 는 프로필에 있는 값을 쓰는데,
+// OAuth 로그인 때 access token 의 account_id claim 에서 채워 둔 것이다.
+func resolveClient(cmd *cobra.Command) (*api.Client, *config.Profile, *output.Writer, error) {
+	prof, w, err := resolveContext()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if prof.APIKey == "" && prof.AccountID == "" {
+		return nil, nil, nil, config.ErrNotAuthenticated
+	}
+	if prof.AccountID == "" {
+		return nil, nil, nil, fmt.Errorf(
+			"프로필 %q 에 계정 ID 가 없습니다. `clawops auth login` 을 다시 실행하세요", prof.Name)
+	}
+	ts := &oauth.TokenSource{
+		Profile: prof,
+		Notify:  func(format string, args ...any) { w.Info(format, args...) },
+	}
+	return api.New(prof.APIBase, prof.AccountID, ts, "clawops-cli/"+buildVersion), prof, w, nil
 }
 
 // notImplemented 는 아직 배선되지 않은 커맨드가 돌려주는 에러다.

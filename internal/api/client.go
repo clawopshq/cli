@@ -17,6 +17,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -57,13 +58,37 @@ type Error struct {
 	Code       string
 	Message    string
 	Raw        json.RawMessage
+
+	// MissingScope 는 서버가 scope 부족으로 거절하면서 알려 준 필요 scope 다
+	// (RFC 6750 의 WWW-Authenticate: Bearer error="insufficient_scope", scope="...").
+	// 사용자가 할 일이 정해져 있는 유일한 에러라 따로 보관한다 — 승격 명령을 안내한다.
+	MissingScope string
 }
 
 func (e *Error) Error() string {
+	if e.MissingScope != "" {
+		return fmt.Sprintf("권한이 없습니다 (%s). 승격하세요:\n  clawops auth refresh -s %s",
+			e.MissingScope, e.MissingScope)
+	}
 	if e.Message != "" {
 		return fmt.Sprintf("%s (HTTP %d)", e.Message, e.StatusCode)
 	}
 	return fmt.Sprintf("HTTP %d", e.StatusCode)
+}
+
+// scopeRe 는 WWW-Authenticate 에서 scope="..." 를 뽑는다.
+var scopeRe = regexp.MustCompile(`scope="([^"]+)"`)
+
+// missingScopeFrom 은 insufficient_scope 응답에서 필요한 scope 를 읽는다.
+// 다른 이유의 403(계정 불일치 등)은 scope 힌트가 없으므로 빈 문자열이 된다.
+func missingScopeFrom(header string) string {
+	if !strings.Contains(header, "insufficient_scope") {
+		return ""
+	}
+	if m := scopeRe.FindStringSubmatch(header); len(m) == 2 {
+		return m[1]
+	}
+	return ""
 }
 
 // Do 는 /v1/accounts/{accountId} 하위 경로를 호출한다.
@@ -107,7 +132,11 @@ func (c *Client) Do(ctx context.Context, method, path string, query url.Values, 
 		return err
 	}
 	if resp.StatusCode >= 400 {
-		return parseError(resp.StatusCode, raw)
+		apiErr := parseError(resp.StatusCode, raw)
+		if e, ok := apiErr.(*Error); ok {
+			e.MissingScope = missingScopeFrom(resp.Header.Get("WWW-Authenticate"))
+		}
+		return apiErr
 	}
 	if out == nil || len(raw) == 0 {
 		return nil

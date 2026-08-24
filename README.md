@@ -4,15 +4,17 @@ ClawOps CLI — 터미널에서 전화와 문자를 다룬다.
 
 ```bash
 clawops auth login
-clawops messages send "점검 안내" --to 01000000000
-clawops calls list --status failed --since 1h --json | jq -r '.[].hangupCause' | sort | uniq -c
+clawops messages list --status failed
+clawops messages list --limit 200 --json | jq -r '.[].to' | sort | uniq -c
 ```
 
-> 현재 상태: **`auth` 동작함.** `login` / `logout` / `status` / `refresh` 가 실제로
-> 붙는다. `messages` · `calls` · `numbers` 는 커맨드 트리와 플래그 계약만 확정된
+> 현재 상태: **`auth` 와 `messages list` / `messages get` 이 동작한다.**
+> `messages send` · `calls` · `numbers` 는 커맨드 트리와 플래그 계약만 확정된
 > 상태이고 실행부는 미구현이다.
 >
-> 서버 쪽에 `clawops-cli` public client 를 시드해야 실제 로그인이 된다.
+> 서버가 OIDC access token 을 받아들이는 범위는 **scope 매핑이 있는 operation 까지**다.
+> 지금은 Messages 뿐이라 `calls` · `numbers` 는 서버 쪽 매핑이 먼저 열려야 한다
+> (열리기 전에는 403 `insufficient_scope`).
 
 ## 설치
 
