@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/learners-superpumped/clawops-cli/internal/config"
+	"github.com/clawopshq/cli/internal/config"
 )
 
 func kind(tok string) string {

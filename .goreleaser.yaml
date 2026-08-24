@@ -33,7 +33,7 @@ checksum:
 # 목표로 하되, 초기에는 자체 tap 으로 시작한다.
 brews:
   - repository:
-      owner: learners-superpumped
+      owner: clawopshq
       name: homebrew-tap
     homepage: https://claw-ops.com
     description: ClawOps CLI — 터미널에서 전화와 문자를 다룬다

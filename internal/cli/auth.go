@@ -11,9 +11,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/learners-superpumped/clawops-cli/internal/config"
-	"github.com/learners-superpumped/clawops-cli/internal/oauth"
-	"github.com/learners-superpumped/clawops-cli/internal/output"
+	"github.com/clawopshq/cli/internal/config"
+	"github.com/clawopshq/cli/internal/oauth"
+	"github.com/clawopshq/cli/internal/output"
 )
 
 func newAuthCmd() *cobra.Command {

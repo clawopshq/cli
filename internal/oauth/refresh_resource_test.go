@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/learners-superpumped/clawops-cli/internal/config"
+	"github.com/clawopshq/cli/internal/config"
 )
 
 // refresh 요청에도 resource 를 실어야 한다 (RFC 8707).

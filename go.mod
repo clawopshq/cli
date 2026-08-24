@@ -1,4 +1,4 @@
-module github.com/learners-superpumped/clawops-cli
+module github.com/clawopshq/cli
 
 go 1.26.5
 

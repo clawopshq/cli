@@ -19,7 +19,7 @@ clawops messages list --limit 200 --json | jq -r '.[].to' | sort | uniq -c
 ## 설치
 
 ```bash
-brew install learners-superpumped/tap/clawops
+brew install clawopshq/tap/clawops
 # 또는
 curl -fsSL https://cli.claw-ops.com/install | sh
 ```

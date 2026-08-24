@@ -9,8 +9,8 @@ import (
 	"github.com/mattn/go-runewidth"
 	"github.com/spf13/cobra"
 
-	"github.com/learners-superpumped/clawops-cli/internal/api"
-	"github.com/learners-superpumped/clawops-cli/internal/output"
+	"github.com/clawopshq/cli/internal/api"
+	"github.com/clawopshq/cli/internal/output"
 )
 
 func newMessagesCmd() *cobra.Command {

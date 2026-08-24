@@ -14,7 +14,7 @@ import (
 	"github.com/gofrs/flock"
 	"golang.org/x/oauth2"
 
-	"github.com/learners-superpumped/clawops-cli/internal/config"
+	"github.com/clawopshq/cli/internal/config"
 )
 
 // refreshLockTimeout 은 다른 프로세스의 refresh 를 기다리는 최대 시간이다.
