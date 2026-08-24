@@ -35,8 +35,9 @@ brews:
   - repository:
       owner: clawopshq
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: https://claw-ops.com
-    description: ClawOps CLI — 터미널에서 전화와 문자를 다룬다
+    description: ClawOps CLI — AI Agent를 위한 한국 전화·문자 API
     license: MIT
 
 changelog:
