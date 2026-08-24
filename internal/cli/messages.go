@@ -26,9 +26,10 @@ func newMessagesCmd() *cobra.Command {
 
 func newMessagesSendCmd() *cobra.Command {
 	var (
-		to       []string
+		to       string
 		from     string
 		bodyFile string
+		msgType  string
 		subject  string
 		mediaURL []string
 		wait     bool
@@ -37,12 +38,17 @@ func newMessagesSendCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "send [본문]",
 		Short: "문자를 보낸다",
-		Long: "문자를 보낸다. 본문은 위치 인자, --body-file, stdin 중 하나로 준다.\n\n" +
-			"--from 은 프로필의 기본 발신번호가 있으면 생략할 수 있다.\n" +
-			"길이와 첨부에 따라 SMS/LMS/MMS 는 서버가 판정한다 — CLI 가 추측하지 않는다.",
+		Long: "문자를 보낸다. 본문은 위치 인자, --body-file, stdin 중 하나로 준다. 수신자는 한 번에 한 명이다\n" +
+			"— 여러 명에게 보내려면 셸에서 반복 호출한다(서버 API 자체가 건당 한 명만 받는다).\n\n" +
+			"--from 은 프로필의 기본 발신번호가 있으면 생략할 수 있다.\n\n" +
+			"--type 은 생략하면 서버 기본값 sms 다. **--subject 나 --media-url 을 쓰려면 --type 을\n" +
+			"lms 또는 mms 로 명시해야 한다** — 서버는 본문 길이나 첨부 유무로 타입을 추측해 올려주지\n" +
+			"않는다(그러면 사용자가 모르는 새 단가가 바뀐다). 안 맞으면 서버가 400 으로 거절한다.",
 		Example: "  clawops messages send \"점검 안내\" --to 01000000000\n" +
 			"  echo \"본문\" | clawops messages send --to 01000000000\n" +
-			"  clawops messages send --body-file notice.txt --to 01000000000 --wait",
+			"  clawops messages send --type lms --subject \"공지\" --body-file notice.txt --to 01000000000\n" +
+			"  clawops messages send --type mms --media-url https://example.com/a.jpg --to 01000000000 \"사진\"\n" +
+			"  clawops messages send \"인증번호는 482913입니다\" --to 01000000000 --wait",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, w, err := resolveContext()
@@ -56,11 +62,11 @@ func newMessagesSendCmd() *cobra.Command {
 			if strings.TrimSpace(body) == "" {
 				return fmt.Errorf("본문이 비어 있습니다 (위치 인자, --body-file, stdin 중 하나)")
 			}
-			if len(to) == 0 {
+			if strings.TrimSpace(to) == "" {
 				return fmt.Errorf("--to 가 필요합니다")
 			}
 			_ = w
-			_, _, _, _, _ = from, subject, mediaURL, wait, dryRun
+			_, _, _, _, _, _ = from, msgType, subject, mediaURL, wait, dryRun
 
 			// TODO(scaffold): POST /v1/accounts/{id}/messages
 			//   요청 필드는 Twilio 호환 PascalCase — To / From / Body / Type / Subject / MediaUrl.
@@ -71,13 +77,14 @@ func newMessagesSendCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringSliceVar(&to, "to", nil, "수신번호 (반복 지정 가능)")
+	f.StringVar(&to, "to", "", "수신번호 (한 번에 한 명 — 여러 명은 반복 호출)")
 	f.StringVar(&from, "from", "", "발신번호 (기본: 프로필의 기본 발신번호)")
 	f.StringVar(&bodyFile, "body-file", "", "본문을 파일에서 읽는다")
-	f.StringVar(&subject, "subject", "", "LMS/MMS 제목")
-	f.StringSliceVar(&mediaURL, "media-url", nil, "MMS 첨부 URL")
+	f.StringVar(&msgType, "type", "", "종류 (sms|lms|mms, 기본: 서버값 sms)")
+	f.StringVar(&subject, "subject", "", "제목 (--type lms 또는 mms 에서만 허용)")
+	f.StringSliceVar(&mediaURL, "media-url", nil, "첨부 이미지 URL, 최대 3개 (--type mms 에서만 허용)")
 	f.BoolVar(&wait, "wait", false, "종착 상태까지 기다린다 (실패면 exit 1)")
-	f.BoolVar(&dryRun, "dry-run", false, "보내지 않고 검증만 한다")
+	f.BoolVar(&dryRun, "dry-run", false, "보내지 않고 조립된 요청만 출력한다")
 	return cmd
 }
 
