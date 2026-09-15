@@ -316,6 +316,6 @@ func canOpenBrowser() bool {
 func headlessHint() string {
 	return "브라우저를 쓸 수 없는 환경이라면 API 키로 인증하세요:\n" +
 		"  로컬에서  clawops api-keys create --name ci\n" +
-		"  또는      https://platform.claw-ops.com/settings/api-keys\n" +
+		"  또는      https://platform.claw-ops.com/api-keys\n" +
 		"  export CLAWOPS_API_KEY=sk_..."
 }
